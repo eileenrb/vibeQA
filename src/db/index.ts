@@ -70,7 +70,7 @@ try {
       severity TEXT NOT NULL,
       environment TEXT,
       test_case_id TEXT REFERENCES test_cases(id) ON DELETE SET NULL,
-      cycle_id TEXT REFERENCES regression_cycles(id) ON DELETE SET NULL,
+      cycle_id TEXT REFERENCES regression_cycles(id) ON DELETE CASCADE,
       assignee_id TEXT REFERENCES users(id) ON DELETE SET NULL,
       qa_id TEXT REFERENCES users(id) ON DELETE SET NULL,
       reopen_count INTEGER DEFAULT 0,

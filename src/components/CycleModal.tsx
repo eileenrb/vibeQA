@@ -14,7 +14,7 @@ interface CycleModalProps {
 
 export default function CycleModal({ onClose, onSave, users, initialData, currentUser }: CycleModalProps) {
   const [formData, setFormData] = useState({
-    id: initialData?.id || `RC-${new Date().getFullYear()}-${Math.floor(Math.random() * 100) + 1}`,
+    id: initialData?.id || '',
     name: initialData?.name || '',
     description: initialData?.description || '',
     version: initialData?.version || '',
@@ -26,6 +26,10 @@ export default function CycleModal({ onClose, onSave, users, initialData, curren
 
   const handleSubmit = (e: FormEvent) => {
     e.preventDefault();
+    if (!formData.id) {
+      alert('Cycle ID cannot be empty.');
+      return;
+    }
     onSave(formData, initialData ? 'PUT' : 'POST');
     onClose();
   };
@@ -60,10 +64,15 @@ export default function CycleModal({ onClose, onSave, users, initialData, curren
               <input 
                 required 
                 type="text" 
-                className="w-full px-4 py-2.5 bg-slate-100 border border-slate-200 rounded-xl text-sm font-bold outline-none text-slate-500"
+                placeholder="e.g. REG-001"
+                className={`w-full px-4 py-2.5 rounded-xl text-sm font-bold outline-none ${
+                  initialData 
+                    ? 'bg-slate-100 border border-slate-200 text-slate-500 cursor-not-allowed' 
+                    : 'bg-slate-50 border border-slate-200 focus:ring-2 focus:ring-indigo-500'
+                }`}
                 value={formData.id}
                 readOnly={!!initialData}
-                onChange={e => setFormData({ ...formData, id: e.target.value })}
+                onChange={e => !initialData && setFormData({ ...formData, id: e.target.value })}
               />
             </div>
             <div>
@@ -71,7 +80,7 @@ export default function CycleModal({ onClose, onSave, users, initialData, curren
               <input 
                 required 
                 type="text" 
-                placeholder="v1.0.0"
+                placeholder="e.g. v1.0.0"
                 className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold focus:ring-2 focus:ring-indigo-500 outline-none"
                 value={formData.version} 
                 onChange={e => setFormData({ ...formData, version: e.target.value })}
@@ -95,7 +104,7 @@ export default function CycleModal({ onClose, onSave, users, initialData, curren
             <div>
               <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">Owner</label>
               <select 
-                className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold focus:ring-2 focus:ring-indigo-500 outline-none"
+                className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold focus:ring-2 focus:ring-indigo-500 outline-none appearance-none bg-[url('data:image/svg+xml;charset=utf-8,%3Csvg_xmlns=%22http://www.w3.org/2000/svg%22_fill=%22none%22_viewBox=%220_0_20_20%22%3E%3Cpath_stroke=%22%236b7280%22_stroke-linecap=%22round%22_stroke-linejoin=%22round%22_stroke-width=%221.5%22_d=%22m6_8_4_4_4-4%22/%3E%3C/svg%3E')] bg-[position:right_16px_center] bg-no-repeat pr-10"
                 value={formData.ownerId}
                 onChange={e => setFormData({ ...formData, ownerId: e.target.value })}
               >
@@ -107,7 +116,7 @@ export default function CycleModal({ onClose, onSave, users, initialData, curren
             <div>
               <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">Status</label>
               <select 
-                className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold focus:ring-2 focus:ring-indigo-500 outline-none"
+                className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold focus:ring-2 focus:ring-indigo-500 outline-none appearance-none bg-[url('data:image/svg+xml;charset=utf-8,%3Csvg_xmlns=%22http://www.w3.org/2000/svg%22_fill=%22none%22_viewBox=%220_0_20_20%22%3E%3Cpath_stroke=%22%236b7280%22_stroke-linecap=%22round%22_stroke-linejoin=%22round%22_stroke-width=%221.5%22_d=%22m6_8_4_4_4-4%22/%3E%3C/svg%3E')] bg-[position:right_16px_center] bg-no-repeat pr-10"
                 value={formData.status}
                 onChange={e => setFormData({ ...formData, status: e.target.value as CycleStatus })}
               >
@@ -148,7 +157,7 @@ export default function CycleModal({ onClose, onSave, users, initialData, curren
           <button 
             type="submit"
             onClick={handleSubmit}
-            className="px-8 py-2.5 bg-indigo-600 text-white rounded-xl text-xs font-black uppercase tracking-widest flex items-center gap-2 hover:bg-indigo-700 transition-all shadow-xl shadow-indigo-900/20"
+            className="px-8 py-2.5 bg-slate-900 text-white rounded-xl text-xs font-black uppercase tracking-widest flex items-center gap-2 hover:bg-black transition-all shadow-xl shadow-slate-900/20"
           >
             <Save className="w-4 h-4" /> Save Cycle
           </button>

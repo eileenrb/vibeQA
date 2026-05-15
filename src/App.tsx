@@ -6,6 +6,7 @@ import {
   CheckCircle2, 
   XCircle, 
   PauseCircle, 
+  AlertCircle,
   RefreshCcw, 
   Circle,
   Filter,
@@ -17,6 +18,7 @@ import {
   Users as UsersIcon,
   Bell,
   LogOut,
+  ChevronDown,
   ChevronRight,
   TrendingUp,
   MoreVertical,
@@ -60,14 +62,11 @@ type ActiveView = 'dashboard' | 'repository' | 'regressions' | 'bugs' | 'users';
 export default function App() {
   const { user, loading: authLoading, logout } = useAuth();
   const [activeView, setActiveView] = useState<ActiveView>('dashboard');
-  const [viewModes, setViewModes] = useState({
-    bugs: 'grid' as 'grid' | 'list',
-    regressions: 'grid' as 'grid' | 'list'
-  });
   const [testCases, setTestCases] = useState<TestCase[]>([]);
   const [cycles, setCycles] = useState<RegressionCycle[]>([]);
   const [selectedCycleId, setSelectedCycleId] = useState<string>('');
   const [results, setResults] = useState<ExecutionResult[]>([]);
+  const [allResults, setAllResults] = useState<ExecutionResult[]>([]);
   const [bugs, setBugs] = useState<Bug[]>([]);
   const [users, setUsers] = useState<User[]>([]);
   
@@ -89,6 +88,34 @@ export default function App() {
     export: false
   });
   
+  const [confirmModal, setConfirmModal] = useState<{
+    show: boolean;
+    title: string;
+    message: string;
+    onConfirm: () => void;
+  }>({ show: false, title: '', message: '', onConfirm: () => {} });
+
+  const [columnFilters, setColumnFilters] = useState<Record<string, string>>({});
+  const [dataLoading, setDataLoading] = useState(false);
+
+  const NoResults = ({ onReset }: { onReset: () => void }) => (
+    <div className="flex flex-col items-center justify-center py-20 px-4">
+      <div className="w-20 h-20 bg-slate-50 rounded-[32px] flex items-center justify-center mb-6 border border-slate-100 shadow-sm">
+        <Search className="w-10 h-10 text-slate-300" />
+      </div>
+      <h3 className="text-xl font-black text-slate-900 tracking-tight mb-2">No matching results</h3>
+      <p className="text-sm text-slate-500 font-medium max-w-xs text-center mb-8 leading-relaxed">
+        We couldn't find anything matching your current search or filters. Try adjusting your criteria or reset to start over.
+      </p>
+      <button 
+        onClick={onReset}
+        className="px-8 py-3 bg-indigo-600 text-white rounded-2xl text-[11px] font-black uppercase tracking-widest hover:bg-indigo-700 transition-all shadow-xl shadow-indigo-100 flex items-center gap-2"
+      >
+        <RefreshCcw className="w-4 h-4" /> Reset All Filters
+      </button>
+    </div>
+  );
+
   const [editingItem, setEditingItem] = useState<{
     type: 'test' | 'execution' | 'bug' | 'cycle' | 'user',
     data: any
@@ -99,9 +126,11 @@ export default function App() {
   // Initial Loading
   useEffect(() => {
     fetchInitialData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const fetchInitialData = async () => {
+    setDataLoading(true);
     try {
       const [tcRes, cycleRes, bugRes, userRes] = await Promise.all([
         fetch('/api/test-cases'),
@@ -114,12 +143,15 @@ export default function App() {
       setCycles(cyclesData);
       setBugs(await bugRes.json());
       setUsers(await userRes.json());
+      await fetchAllResults();
       
       if (cyclesData.length > 0 && !selectedCycleId) {
         setSelectedCycleId(cyclesData[0].id);
       }
     } catch (err) {
       console.error('Failed to fetch data', err);
+    } finally {
+      setDataLoading(false);
     }
   };
 
@@ -130,6 +162,11 @@ export default function App() {
   const fetchResults = async (id: string) => {
     const res = await fetch(`/api/results/${id}`);
     setResults(await res.json());
+  };
+
+  const fetchAllResults = async () => {
+    const res = await fetch('/api/results');
+    setAllResults(await res.json());
   };
 
   // Statistics
@@ -204,7 +241,7 @@ export default function App() {
             <h3 className="text-sm font-black text-slate-900 mb-6 uppercase tracking-widest">Test Execution Health</h3>
             <div className="flex-1 flex flex-col justify-center min-h-[300px]">
               <div className="h-64">
-                <ResponsiveContainer width="100%" height="100%">
+                <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
                   <PieChart>
                     <Pie
                       data={chartData}
@@ -249,7 +286,7 @@ export default function App() {
               </select>
             </div>
             <div className="flex-1 h-64">
-              <ResponsiveContainer width="100%" height="100%">
+              <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
                 <BarChart data={bugTrend}>
                   <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
                   <XAxis 
@@ -281,6 +318,31 @@ export default function App() {
   };
 
   const RepositoryView = () => {
+    const filtered = useMemo(() => {
+      const s = search.toLowerCase();
+      return testCases.filter(tc => { // Filter test cases first
+        // Find the latest result for this test case within the selected cycle
+        // This is crucial if there are duplicate execution results due to missing unique constraint
+        const result = results.find(r => r.testCaseId === tc.id);
+        const status = result?.status || 'Not Run';
+        const tester = users.find(u => u.id === result?.testerId)?.name || '';
+
+        const matchesSearch = (
+          tc.id.toLowerCase().includes(s) ||
+          tc.module.toLowerCase().includes(s) ||
+          tc.title.toLowerCase().includes(s) ||
+          (tc.feature || '').toLowerCase().includes(s) ||
+          status.toLowerCase().includes(s) ||
+          tester.toLowerCase().includes(s)
+        );
+
+        const matchesModule = !columnFilters.module || tc.module === columnFilters.module;
+        const matchesStatus = !columnFilters.status || status === columnFilters.status;
+
+        return matchesSearch && matchesModule && matchesStatus;
+      });
+    }, [testCases, results, search, users, columnFilters]);
+
     return (
       <div className="space-y-4">
         <div className="flex items-center justify-between mb-4">
@@ -288,16 +350,56 @@ export default function App() {
             <div className="relative">
               <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
               <input 
-                type="text" placeholder="Search Repo..."
-                className="pl-9 pr-4 py-2 bg-white border border-slate-200 rounded-lg text-sm w-64 focus:ring-2 focus:ring-indigo-500 outline-none"
+                type="text" placeholder="Search Repository..."
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className="pl-9 pr-4 py-2 bg-white border border-slate-200 rounded-xl text-sm w-64 focus:ring-4 focus:ring-indigo-50 outline-none transition-all font-bold"
               />
             </div>
+
+            <div className="relative">
+              <select 
+                value={columnFilters.module || ''}
+                onChange={(e) => setColumnFilters({ ...columnFilters, module: e.target.value })}
+                className="px-4 py-2 bg-white border border-slate-200 rounded-xl text-[10px] font-black uppercase tracking-widest outline-none focus:ring-4 focus:ring-indigo-50 appearance-none pr-10 transition-all cursor-pointer"
+              >
+                <option value="">All Modules</option>
+                {Array.from(new Set(testCases.map(tc => tc.module))).filter(Boolean).map(m => <option key={m} value={m}>{m}</option>)}
+              </select>
+              <ChevronDown className="w-3.5 h-3.5 absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+            </div>
+
+            <div className="relative">
+              <select 
+                value={columnFilters.status || ''}
+                onChange={(e) => setColumnFilters({ ...columnFilters, status: e.target.value })}
+                className="px-4 py-2 bg-white border border-slate-200 rounded-xl text-[10px] font-black uppercase tracking-widest outline-none focus:ring-4 focus:ring-indigo-50 appearance-none pr-10 transition-all cursor-pointer"
+              >
+                <option value="">All Status</option>
+                {['Pass', 'Fail', 'Blocked', 'Retest', 'Not Run'].map(s => <option key={s} value={s}>{s}</option>)}
+              </select>
+              <ChevronDown className="w-3.5 h-3.5 absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+            </div>
+
+            <AnimatePresence>
+              {(search || columnFilters.module || columnFilters.status) && (
+                <motion.button 
+                  initial={{ opacity: 0, scale: 0.95 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.95 }}
+                  onClick={() => { setSearch(''); setColumnFilters(prev => ({ ...prev, module: '', status: '' })); }}
+                  className="px-4 py-2 bg-slate-100 text-slate-600 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-slate-200 transition-all border border-slate-200 flex items-center gap-2"
+                >
+                  <XCircle className="w-3.5 h-3.5" /> Clear All
+                </motion.button>
+              )}
+            </AnimatePresence>
           </div>
           <button 
             onClick={() => { setEditingItem(null); setModals(m => ({...m, test: true})); }}
-            className="bg-slate-900 text-white px-4 py-2 rounded-lg text-sm font-bold flex items-center gap-2"
+            className="bg-slate-900 text-white px-6 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest flex items-center gap-2 shadow-lg hover:bg-black transition-all"
           >
-            <Plus className="w-4 h-4" /> New Test Case
+            <Plus className="w-4 h-4" /> Create Test Case
           </button>
         </div>
 
@@ -305,61 +407,82 @@ export default function App() {
           <table className="w-full text-left">
             <thead className="bg-slate-50 text-slate-600 text-[10px] uppercase font-black tracking-widest border-b border-slate-200">
               <tr>
-                <th className="px-6 py-4">ID</th>
+                <th className="px-6 py-4 w-48">ID</th>
                 <th className="px-6 py-4">Module</th>
                 <th className="px-6 py-4 text-left">Title</th>
-                <th className="px-6 py-4">Priority</th>
-                <th className="px-6 py-4">Severity</th>
                 <th className="px-6 py-4">Tester</th>
                 <th className="px-6 py-4">Execution Status</th>
                 <th className="px-6 py-4"></th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {testCases.map(tc => {
-                const result = results.find(r => r.testCaseId === tc.id);
+              {dataLoading ? (
+                <tr>
+                  <td colSpan={6} className="text-center py-10">
+                    <Loader2 className="w-6 h-6 text-indigo-500 animate-spin mx-auto" />
+                    <p className="text-sm text-slate-500 mt-2">Loading data...</p>
+                  </td>
+                </tr>
+              ) : filtered.length > 0 ? filtered.map(tc => {
+                // Ensure we get the latest result if multiple exist for the same TC in the same cycle
+                const latestResult = results.filter(r => r.testCaseId === tc.id && r.cycleId === selectedCycleId)
+                                            .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())[0];
                 return (
                   <tr key={tc.id} className="hover:bg-slate-50 transition-colors group">
                     <td className="px-6 py-4 font-mono text-indigo-700 font-bold text-xs">{tc.id}</td>
                     <td className="px-6 py-4 text-xs font-bold text-slate-600">{tc.module}</td>
                     <td className="px-6 py-4">
                       <div className="text-[13px] font-bold text-slate-900">{tc.title}</div>
-                      <div className="text-[10px] text-slate-600 line-clamp-1">{tc.feature}</div>
-                    </td>
-                    <td className="px-6 py-4">
-                      <StatusBadge type="priority" value={tc.priority} />
-                    </td>
-                    <td className="px-6 py-4">
-                      <StatusBadge type="severity" value={tc.severity} />
+                      <div className="text-[10px] text-slate-600 line-clamp-1">{tc.feature || 'N/A'}</div>
                     </td>
                     <td className="px-6 py-4 text-xs font-black text-slate-500">
-                      {result?.testerId ? (users.find(u => u.id === result.testerId)?.name || 'Unknown') : '-'}
+                      {latestResult?.testerId ? (users.find(u => u.id === latestResult.testerId)?.name || 'Unknown') : '-'}
                     </td>
                     <td className="px-6 py-4">
                        <button 
                          onClick={() => { setCurrentTestCase(tc); setModals(m => ({ ...m, execution: true })) }}
                          className={cn(
                            "px-4 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest border transition-all shadow-sm",
-                           result?.status === 'Pass' ? "bg-emerald-50 border-emerald-200 text-emerald-600" :
-                           result?.status === 'Fail' ? "bg-rose-50 border-rose-200 text-rose-600 shadow-rose-100" :
-                           result?.status === 'Blocked' ? "bg-amber-50 border-amber-200 text-amber-600" :
+                           latestResult?.status === 'Pass' ? "bg-emerald-50 border-emerald-200 text-emerald-600" :
+                           latestResult?.status === 'Fail' ? "bg-rose-50 border-rose-200 text-rose-600 shadow-rose-100" :
+                           latestResult?.status === 'Blocked' ? "bg-amber-50 border-amber-200 text-amber-600" :
                            "bg-slate-50 border-slate-100 text-slate-400 hover:border-slate-300"
                          )}
                        >
-                         {result ? result.status : 'Not Run'}
+                         {latestResult ? latestResult.status : 'Not Run'}
                        </button>
                     </td>
                     <td className="px-6 py-4 text-right">
-                      <button 
-                        onClick={() => { setEditingItem({ type: 'test', data: tc }); setModals(m => ({...m, test: true})); }}
-                        className="p-1 text-slate-300 hover:text-indigo-600 transition-colors"
-                      >
-                        <MoreVertical className="w-4 h-4" />
-                      </button>
+                      <div className="flex items-center justify-end gap-2">
+                        <button 
+                          onClick={() => { setEditingItem({ type: 'test', data: tc }); setModals(m => ({...m, test: true})); }}
+                          className="p-1 text-slate-300 hover:text-indigo-600 transition-colors"
+                        >
+                          <MoreVertical className="w-4 h-4" />
+                        </button>
+                        {user?.role === 'Admin' && (
+                          <button 
+                            onClick={() => setConfirmModal({
+                              show: true,
+                              title: 'Delete Test Case',
+                              message: `Are you sure you want to remove ${tc.id}?`,
+                              onConfirm: () => handleDeleteTestCase(tc.id)
+                            })}
+                            className="p-1 text-slate-300 hover:text-rose-600 transition-colors"
+                            title="Delete test case"
+                          >
+                            <XCircle className="w-4 h-4" />
+                          </button>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 );
-              })}
+              }) : (
+                <tr>
+                  <td colSpan={6}><NoResults onReset={() => { setSearch(''); setColumnFilters(prev => ({ ...prev, module: '', status: '' })); }} /></td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>
@@ -369,15 +492,29 @@ export default function App() {
 
   const BugView = () => {
     const [bugSearch, setBugSearch] = useState('');
-    const [bugFilter, setBugFilter] = useState('All');
 
     const filteredBugs = useMemo(() => {
+      const s = bugSearch.toLowerCase();
       return bugs.filter(b => {
-        const matchesSearch = b.title.toLowerCase().includes(bugSearch.toLowerCase()) || b.id.toLowerCase().includes(bugSearch.toLowerCase());
-        const matchesFilter = bugFilter === 'All' || b.status === bugFilter || b.severity === bugFilter;
-        return matchesSearch && matchesFilter;
+        if (selectedCycleId && b.cycleId !== selectedCycleId) return false;
+
+        const assignee = users.find(u => u.id === b.assigneeId)?.name || 'Unassigned';
+        const matchesSearch = (
+          b.id.toLowerCase().includes(s) ||
+          b.title.toLowerCase().includes(s) ||
+          b.status.toLowerCase().includes(s) ||
+          b.priority.toLowerCase().includes(s) ||
+          (b.testCaseId || '').toLowerCase().includes(s) ||
+          assignee.toLowerCase().includes(s)
+        );
+
+        const matchesStatus = !columnFilters.bugStatus || b.status === columnFilters.bugStatus;
+        const matchesPriority = !columnFilters.bugPriority || b.priority === columnFilters.bugPriority;
+        const matchesSeverity = !columnFilters.bugSeverity || b.severity === columnFilters.bugSeverity;
+
+        return matchesSearch && matchesStatus && matchesPriority && matchesSeverity;
       });
-    }, [bugs, bugSearch, bugFilter]);
+    }, [bugs, bugSearch, users, columnFilters, selectedCycleId]);
 
     return (
       <div className="space-y-4">
@@ -387,41 +524,64 @@ export default function App() {
               <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
               <input 
                 type="text" 
-                placeholder="Search issues..."
+                placeholder="Search Issues..."
                 value={bugSearch}
                 onChange={(e) => setBugSearch(e.target.value)}
                 className="pl-9 pr-4 py-2 bg-white border border-slate-200 rounded-xl text-sm w-full md:w-64 focus:ring-4 focus:ring-indigo-50 outline-none transition-all font-bold"
               />
             </div>
-            <select 
-              value={bugFilter}
-              onChange={(e) => setBugFilter(e.target.value)}
-              className="px-4 py-2 bg-white border border-slate-200 rounded-xl text-xs font-black uppercase tracking-widest outline-none focus:ring-4 focus:ring-indigo-50"
-            >
-              <option value="All">All Status</option>
-              <option value="Todo">Todo</option>
-              <option value="In Progress">In Progress</option>
-              <option value="Ready for Build">Ready for Build</option>
-              <option value="Reopen">Reopen</option>
-              <option value="Done">Done</option>
-              <option value="Critical">Critical</option>
-            </select>
+
+            <div className="relative">
+              <select 
+                value={columnFilters.bugStatus || ''}
+                onChange={(e) => setColumnFilters({ ...columnFilters, bugStatus: e.target.value })}
+                className="px-4 py-2 bg-white border border-slate-200 rounded-xl text-[10px] font-black uppercase tracking-widest outline-none focus:ring-4 focus:ring-indigo-50 appearance-none pr-10 transition-all cursor-pointer"
+              >
+                <option value="">All Status</option>
+                {['Todo', 'In Progress', 'Ready for Build', 'Reopen', 'Done'].map(s => <option key={s} value={s}>{s}</option>)}
+              </select>
+              <ChevronDown className="w-3.5 h-3.5 absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+            </div>
+
+            <div className="relative">
+              <select 
+                value={columnFilters.bugPriority || ''}
+                onChange={(e) => setColumnFilters({ ...columnFilters, bugPriority: e.target.value })}
+                className="px-4 py-2 bg-white border border-slate-200 rounded-xl text-[10px] font-black uppercase tracking-widest outline-none focus:ring-4 focus:ring-indigo-50 appearance-none pr-10 transition-all cursor-pointer"
+              >
+                <option value="">All Priority</option>
+                {['High', 'Medium', 'Low'].map(p => <option key={p} value={p}>{p}</option>)}
+              </select>
+              <ChevronDown className="w-3.5 h-3.5 absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+            </div>
+
+            <div className="relative">
+              <select 
+                value={columnFilters.bugSeverity || ''}
+                onChange={(e) => setColumnFilters({ ...columnFilters, bugSeverity: e.target.value })}
+                className="px-4 py-2 bg-white border border-slate-200 rounded-xl text-[10px] font-black uppercase tracking-widest outline-none focus:ring-4 focus:ring-indigo-50 appearance-none pr-10 transition-all cursor-pointer"
+              >
+                <option value="">All Severity</option>
+                {['Critical', 'Major', 'Minor', 'Trivial'].map(s => <option key={s} value={s}>{s}</option>)}
+              </select>
+              <ChevronDown className="w-3.5 h-3.5 absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+            </div>
+
+            <AnimatePresence>
+              {(bugSearch || columnFilters.bugStatus || columnFilters.bugPriority || columnFilters.bugSeverity) && (
+                <motion.button 
+                  initial={{ opacity: 0, scale: 0.95 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.95 }}
+                  onClick={() => { setBugSearch(''); setColumnFilters(prev => ({ ...prev, bugStatus: '', bugPriority: '', bugSeverity: '' })); }}
+                  className="px-4 py-2 bg-slate-100 text-slate-600 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-slate-200 transition-all border border-slate-200 flex items-center gap-2"
+                >
+                  <XCircle className="w-3.5 h-3.5" /> Clear All
+                </motion.button>
+              )}
+            </AnimatePresence>
           </div>
           <div className="flex gap-2">
-            <div className="flex p-1 bg-slate-100 rounded-xl">
-              <button 
-                onClick={() => setViewModes(v => ({...v, bugs: 'grid'}))}
-                className={cn("p-2 rounded-lg transition-all", viewModes.bugs === 'grid' ? "bg-white shadow-sm text-indigo-600" : "text-slate-400")}
-              >
-                <Kanban className="w-4 h-4" />
-              </button>
-              <button 
-                onClick={() => setViewModes(v => ({...v, bugs: 'list'}))}
-                className={cn("p-2 rounded-lg transition-all", viewModes.bugs === 'list' ? "bg-white shadow-sm text-indigo-600" : "text-slate-400")}
-              >
-                <Database className="w-4 h-4" />
-              </button>
-            </div>
             <button 
               onClick={() => { setEditingItem(null); setModals(m => ({ ...m, bug: true })); }}
               className="bg-rose-600 text-white px-6 py-2 rounded-xl text-xs font-black uppercase tracking-widest flex items-center gap-2 hover:bg-rose-700 transition-all shadow-lg shadow-rose-200"
@@ -431,55 +591,6 @@ export default function App() {
           </div>
         </div>
 
-        {viewModes.bugs === 'grid' ? (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {filteredBugs.map(bug => (
-              <div key={bug.id} className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm relative group overflow-hidden hover:border-rose-200 transition-all">
-                 <div className={cn(
-                   "absolute top-0 left-0 w-1 h-full",
-                   bug.status === 'Todo' ? "bg-slate-400" : 
-                   bug.status === 'In Progress' ? "bg-amber-500" : 
-                   bug.status === 'Ready for Build' ? "bg-blue-500" :
-                   bug.status === 'Reopen' ? "bg-rose-500" :
-                   "bg-emerald-500"
-                 )} />
-                 <div className="flex items-center justify-between mb-3">
-                   <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">{bug.id}</span>
-                   <div className="flex items-center gap-2">
-                     <button 
-                        onClick={() => { setEditingItem({ type: 'bug', data: bug }); setModals(m => ({...m, bug: true})); }}
-                        className="opacity-0 group-hover:opacity-100 p-1 text-slate-300 hover:text-indigo-600 transition-all"
-                     >
-                        <Plus className="w-3.5 h-3.5 rotate-45" />
-                     </button>
-                     {bug.reopenCount > 0 && (
-                       <span className="px-2 py-0.5 bg-rose-50 text-rose-600 text-[10px] font-black rounded-full border border-rose-100">
-                         Reopened {bug.reopenCount}x
-                       </span>
-                     )}
-                   </div>
-                 </div>
-                 <h4 className="text-[14px] font-extrabold text-slate-900 mb-2 leading-tight">{bug.title}</h4>
-                 <p className="text-[11px] text-slate-700 line-clamp-2 mb-4 leading-relaxed">{bug.description}</p>
-                 
-                 <div className="flex items-center justify-between pt-4 border-t border-slate-100">
-                   <div className="flex -space-x-2">
-                     <div className="w-6 h-6 rounded-full bg-indigo-100 flex items-center justify-center text-[10px] font-black text-indigo-600 ring-2 ring-white">
-                        {users.find(u => u.id === bug.qaId)?.name[0] || '?'}
-                     </div>
-                     <div className="w-6 h-6 rounded-full bg-emerald-100 flex items-center justify-center text-[10px] font-black text-emerald-600 ring-2 ring-white">
-                        {users.find(u => u.id === bug.assigneeId)?.name[0] || '?'}
-                     </div>
-                   </div>
-                   <div className="flex items-center gap-2">
-                     <StatusBadge type="bugStatus" value={bug.status} />
-                     <StatusBadge type="severity" value={bug.severity} />
-                   </div>
-                 </div>
-              </div>
-            ))}
-          </div>
-        ) : (
           <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
              <table className="w-full text-left">
                <thead className="bg-slate-50 text-slate-600 text-[10px] uppercase font-black tracking-widest border-b border-slate-200">
@@ -487,12 +598,21 @@ export default function App() {
                    <th className="px-6 py-4">ID</th>
                    <th className="px-6 py-4">Title</th>
                    <th className="px-6 py-4">Status</th>
-                   <th className="px-6 py-4">Severity</th>
+                   <th className="px-6 py-4">Priority</th>
+                   <th className="px-6 py-4">Related TC</th>
                    <th className="px-6 py-4">Assignee</th>
+                   <th className="px-6 py-4"></th>
                  </tr>
                </thead>
                <tbody className="divide-y divide-slate-100">
-                  {filteredBugs.map(bug => (
+                  {dataLoading ? (
+                    <tr>
+                      <td colSpan={7} className="text-center py-10">
+                        <Loader2 className="w-6 h-6 text-indigo-500 animate-spin mx-auto" />
+                        <p className="text-sm text-slate-500 mt-2">Loading data...</p>
+                      </td>
+                    </tr>
+                  ) : filteredBugs.length > 0 ? filteredBugs.map(bug => (
                     <tr key={bug.id} className="hover:bg-slate-50 transition-colors group">
                       <td className="px-6 py-4 font-mono text-rose-600 font-bold text-xs">{bug.id}</td>
                       <td className="px-6 py-4">
@@ -502,17 +622,47 @@ export default function App() {
                         <StatusBadge type="bugStatus" value={bug.status} />
                       </td>
                       <td className="px-6 py-4">
-                         <StatusBadge type="severity" value={bug.severity} />
+                         <StatusBadge type="priority" value={bug.priority} />
+                      </td>
+                      <td className="px-6 py-4">
+                         <span className="text-xs font-bold text-indigo-600 font-mono">{bug.testCaseId || '-'}</span>
                       </td>
                       <td className="px-6 py-4 text-xs font-black text-slate-600">
                          {users.find(u => u.id === bug.assigneeId)?.name || 'Unassigned'}
                       </td>
+                      <td className="px-6 py-4 text-right">
+                        <div className="flex items-center justify-end gap-2">
+                          <button 
+                            onClick={() => { setEditingItem({ type: 'bug', data: bug }); setModals(m => ({...m, bug: true})); }}
+                            className="p-1 text-slate-300 hover:text-indigo-600 transition-colors"
+                          >
+                            <MoreVertical className="w-4 h-4" />
+                          </button>
+                          {user?.role === 'Admin' && (
+                            <button 
+                              onClick={() => setConfirmModal({
+                                show: true,
+                                title: 'Delete Bug',
+                                message: `Remove ${bug.id}? This action cannot be undone.`,
+                                onConfirm: () => handleDeleteBug(bug.id)
+                              })}
+                              className="p-1 text-slate-300 hover:text-rose-600 transition-colors"
+                              title="Delete bug"
+                            >
+                              <XCircle className="w-4 h-4" />
+                            </button>
+                          )}
+                        </div>
+                      </td>
                     </tr>
-                  ))}
+                  )) : (
+                    <tr>
+                      <td colSpan={7}><NoResults onReset={() => { setBugSearch(''); setColumnFilters(prev => ({ ...prev, bugStatus: '', bugPriority: '' })); }} /></td>
+                    </tr>
+                  )}
                </tbody>
              </table>
           </div>
-        )}
       </div>
     );
   };
@@ -521,85 +671,58 @@ export default function App() {
     const [cycleSearch, setCycleSearch] = useState('');
 
     const filteredCycles = useMemo(() => {
-      return cycles.filter(c => 
-        c.name.toLowerCase().includes(cycleSearch.toLowerCase()) || 
-        c.id.toLowerCase().includes(cycleSearch.toLowerCase())
-      );
-    }, [cycles, cycleSearch]);
+      const s = cycleSearch.toLowerCase();
+      return cycles.filter(c => {
+        const matchesSearch = (
+        c.id.toLowerCase().includes(s) ||
+        c.name.toLowerCase().includes(s) ||
+        c.version.toLowerCase().includes(s) ||
+        c.status.toLowerCase().includes(s) ||
+        (users.find(u => u.id === c.ownerId)?.name || '').toLowerCase().includes(s)
+        );
+        const matchesStatus = !columnFilters.cycleStatus || c.status === columnFilters.cycleStatus;
+        return matchesSearch && matchesStatus;
+      });
+    }, [cycles, cycleSearch, users, columnFilters]);
 
     return (
-      <div className="space-y-6">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-           <div>
-             <h3 className="text-lg font-black text-slate-900 tracking-tight">Regression Repository</h3>
-             <p className="text-[10px] text-slate-500 font-black uppercase tracking-widest">Execute and Track Cycles</p>
-           </div>
-           <div className="flex items-center gap-3">
-              <div className="relative">
-                <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                <input 
-                  type="text" 
-                  placeholder="Filter cycles..."
-                  value={cycleSearch}
-                  onChange={(e) => setCycleSearch(e.target.value)}
-                  className="pl-9 pr-4 py-2 bg-white border border-slate-200 rounded-xl text-sm w-64 focus:ring-4 focus:ring-indigo-50 outline-none transition-all font-bold"
-                />
-              </div>
-              <div className="flex p-1 bg-slate-100 rounded-xl">
-                <button 
-                  onClick={() => setViewModes(v => ({...v, regressions: 'grid'}))}
-                  className={cn("p-2 rounded-lg transition-all", viewModes.regressions === 'grid' ? "bg-white shadow-sm text-indigo-600" : "text-slate-400")}
+      <div className="space-y-4">
+        <div className="flex items-center justify-between mb-6">
+          <div className="flex items-center gap-3">
+            <div className="relative">
+              <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+              <input 
+                type="text" 
+                placeholder="Search Cycles..."
+                value={cycleSearch}
+                onChange={(e) => setCycleSearch(e.target.value)}
+                className="pl-9 pr-4 py-2 bg-white border border-slate-200 rounded-xl text-sm w-64 focus:ring-4 focus:ring-indigo-50 outline-none transition-all font-bold"
+              />
+            </div>
+
+            <AnimatePresence>
+              {(cycleSearch || columnFilters.cycleStatus) && (
+                <motion.button 
+                  initial={{ opacity: 0, scale: 0.95 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.95 }}
+                  onClick={() => { setCycleSearch(''); setColumnFilters(prev => ({ ...prev, cycleStatus: '' })); }}
+                  className="px-4 py-2 bg-slate-100 text-slate-600 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-slate-200 transition-all border border-slate-200 flex items-center gap-2"
                 >
-                  <Kanban className="w-4 h-4" />
-                </button>
-                <button 
-                  onClick={() => setViewModes(v => ({...v, regressions: 'list'}))}
-                  className={cn("p-2 rounded-lg transition-all", viewModes.regressions === 'list' ? "bg-white shadow-sm text-indigo-600" : "text-slate-400")}
-                >
-                  <Database className="w-4 h-4" />
-                </button>
-              </div>
-              <button 
-                onClick={() => setModals(m => ({ ...m, cycle: true }))}
-                className="px-6 py-2.5 bg-indigo-600 text-white rounded-xl text-xs font-black uppercase tracking-widest flex items-center gap-2 shadow-lg shadow-indigo-500/20"
-              >
-                <Plus className="w-4 h-4" /> Create Cycle
-              </button>
-           </div>
+                  <XCircle className="w-3.5 h-3.5" /> Clear All
+                </motion.button>
+              )}
+            </AnimatePresence>
+          </div>
+
+          <button 
+            onClick={() => setModals(m => ({ ...m, cycle: true }))}
+            className="px-6 py-2.5 bg-slate-900 text-white rounded-xl text-xs font-black uppercase tracking-widest flex items-center gap-2 shadow-lg hover:bg-black transition-all"
+          >
+            <Plus className="w-4 h-4" /> Create Cycle
+          </button>
         </div>
 
-        {viewModes.regressions === 'grid' ? (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {filteredCycles.map(cycle => (
-              <div key={cycle.id} className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden flex flex-col group hover:border-indigo-300 transition-all">
-                <div className="p-6 flex-1">
-                   <div className="flex items-center justify-between mb-4">
-                     <div className="flex items-center gap-2">
-                       <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">{cycle.id}</span>
-                       <StatusBadge type="execStatus" value={cycle.status} />
-                     </div>
-                     <span className="text-[10px] font-black text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-full">{cycle.version}</span>
-                   </div>
-                   <h4 className="text-lg font-black text-slate-900 group-hover:text-indigo-600 transition-colors">{cycle.name}</h4>
-                   <p className="text-xs text-slate-600 mt-2 line-clamp-2">{cycle.description}</p>
-                   
-                   <div className="mt-6 flex items-center justify-between">
-                     <div className="flex flex-col">
-                        <span className="text-[9px] font-bold uppercase text-slate-500 tracking-wider">Owner</span>
-                        <span className="text-xs font-black text-slate-800">{users.find(u => u.id === cycle.ownerId)?.name || 'Unknown'}</span>
-                     </div>
-                     <button 
-                       onClick={() => { setSelectedCycleId(cycle.id); setActiveView('dashboard'); }}
-                       className="px-4 py-2 bg-slate-950 text-white rounded-lg text-[10px] font-black uppercase tracking-widest hover:bg-indigo-600 transition-all shadow-lg shadow-slate-900/10"
-                     >
-                       Select Cycle
-                     </button>
-                   </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        ) : (
           <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
             <table className="w-full text-left">
               <thead className="bg-slate-50 text-slate-600 text-[10px] uppercase font-black tracking-widest border-b border-slate-200">
@@ -613,7 +736,14 @@ export default function App() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {filteredCycles.map(cycle => (
+                {dataLoading ? (
+                  <tr>
+                    <td colSpan={6} className="text-center py-10">
+                      <Loader2 className="w-6 h-6 text-indigo-500 animate-spin mx-auto" />
+                      <p className="text-sm text-slate-500 mt-2">Loading data...</p>
+                    </td>
+                  </tr>
+                ) : filteredCycles.length > 0 ? filteredCycles.map(cycle => (
                   <tr key={cycle.id} className="hover:bg-slate-50 transition-colors group text-sm font-bold">
                     <td className="px-6 py-4 text-xs font-mono text-indigo-600">{cycle.id}</td>
                     <td className="px-6 py-4 text-slate-900">{cycle.name}</td>
@@ -624,24 +754,35 @@ export default function App() {
                        <div className="flex items-center justify-end gap-2">
                          <button 
                            onClick={() => { setEditingItem({ type: 'cycle', data: cycle }); setModals(m => ({...m, cycle: true})); }}
-                           className="p-1 px-3 bg-slate-100 rounded-lg hover:bg-slate-200 transition-all text-[10px] font-black uppercase tracking-widest text-slate-600"
+                           className="p-1 text-slate-300 hover:text-indigo-600 transition-colors"
                          >
-                           Edit
+                           <MoreVertical className="w-4 h-4" />
                          </button>
-                         <button 
-                           onClick={() => { setSelectedCycleId(cycle.id); setActiveView('dashboard'); }}
-                           className="p-1 px-3 bg-slate-100 rounded-lg hover:bg-slate-200 transition-all text-[10px] font-black uppercase tracking-widest"
-                         >
-                           Open
-                         </button>
+                         {user?.role === 'Admin' && (
+                           <button 
+                             onClick={() => setConfirmModal({
+                               show: true,
+                               title: 'Delete Cycle',
+                               message: `Delete ${cycle.id}? All linked bugs and results will be removed.`,
+                               onConfirm: () => handleDeleteCycle(cycle.id)
+                             })}
+                             className="p-1 text-slate-300 hover:text-rose-600 transition-colors"
+                             title="Delete cycle"
+                           >
+                             <XCircle className="w-4 h-4" />
+                           </button>
+                         )}
                        </div>
                     </td>
                   </tr>
-                ))}
+                )) : (
+                  <tr>
+                    <td colSpan={6}><NoResults onReset={() => { setCycleSearch(''); setColumnFilters(prev => ({ ...prev, cycleStatus: '' })); }} /></td>
+                  </tr>
+                )}
               </tbody>
             </table>
           </div>
-        )}
       </div>
     );
   };
@@ -659,7 +800,7 @@ export default function App() {
            {isAdmin && (
              <button 
                onClick={() => { setEditingItem(null); setModals(m => ({...m, user: true})); }}
-               className="px-6 py-2.5 bg-indigo-600 text-white rounded-xl text-xs font-black uppercase tracking-widest flex items-center gap-2 shadow-lg shadow-indigo-500/20"
+               className="px-6 py-2.5 bg-slate-900 text-white rounded-xl text-xs font-black uppercase tracking-widest flex items-center gap-2 shadow-lg hover:bg-black transition-all"
              >
                <Plus className="w-4 h-4" /> Add Member
              </button>
@@ -673,7 +814,7 @@ export default function App() {
                 <th className="px-8 py-6">Member</th>
                 <th className="px-8 py-6">Role</th>
                 <th className="px-8 py-6 text-left">Email</th>
-                {isAdmin && <th className="px-8 py-6 text-right">Actions</th>}
+                {isAdmin && <th className="px-8 py-6 text-right"></th>}
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -701,10 +842,12 @@ export default function App() {
                           {user?.id !== u.id && (
                             <button 
                               type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleDeleteUser(u.id);
-                              }}
+                              onClick={() => setConfirmModal({
+                                show: true,
+                                title: 'Remove Member',
+                                message: `Are you sure you want to remove ${u.name}? They will lose all access to VibeQA.`,
+                                onConfirm: () => handleDeleteUser(u.id)
+                              })}
                               className="p-2.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition-all cursor-pointer active:scale-95"
                               title="Delete member"
                             >
@@ -732,7 +875,7 @@ export default function App() {
         body: JSON.stringify({ ...data, cycleId: selectedCycleId })
       });
       setModals(m => ({ ...m, execution: false }));
-      fetchResults(selectedCycleId);
+      await Promise.all([fetchResults(selectedCycleId), fetchAllResults()]);
     } catch (err) {
       console.error(err);
     }
@@ -741,6 +884,11 @@ export default function App() {
   const handleSaveTestCase = async (tc: any) => {
     try {
       const method = editingItem?.type === 'test' ? 'PUT' : 'POST';
+      if (method === 'POST' && testCases.some(existingTc => existingTc.id === tc.id)) {
+        setSystemMessage({ text: `Test Case ID '${tc.id}' already exists. Please use a unique ID.`, type: 'error' });
+        return;
+      }
+
       const url = editingItem?.type === 'test' ? `/api/test-cases/${editingItem.data.id}` : '/api/test-cases';
       
       await fetch(url, {
@@ -759,6 +907,11 @@ export default function App() {
   const handleSaveBug = async (bug: any, method: 'POST' | 'PUT' = 'POST') => {
     try {
       const url = method === 'PUT' ? `/api/bugs/${bug.id}` : '/api/bugs';
+      if (method === 'POST' && bugs.some(existingBug => existingBug.id === bug.id)) {
+        setSystemMessage({ text: `Bug ID '${bug.id}' already exists. Please use a unique ID.`, type: 'error' });
+        return;
+      }
+
       await fetch(url, {
         method,
         headers: { 'Content-Type': 'application/json' },
@@ -775,6 +928,11 @@ export default function App() {
   const handleSaveCycle = async (cycle: any, method: 'POST' | 'PUT' = 'POST') => {
     try {
       const url = method === 'PUT' ? `/api/cycles/${cycle.id}` : '/api/cycles';
+      if (method === 'POST' && cycles.some(existingCycle => existingCycle.id === cycle.id)) {
+        setSystemMessage({ text: `Cycle ID '${cycle.id}' already exists. Please use a unique ID.`, type: 'error' });
+        return;
+      }
+
       await fetch(url, {
         method,
         headers: { 'Content-Type': 'application/json' },
@@ -808,6 +966,58 @@ export default function App() {
     }
   };
 
+  const handleDeleteTestCase = async (tcId: string) => {
+    try {
+      const res = await fetch(`/api/test-cases/${tcId}`, { method: 'DELETE' });
+      if (res.ok) {
+        await fetchInitialData(); // Await data re-fetch
+        setSystemMessage({ text: `Test Case ${tcId} deleted successfully`, type: 'success' });
+      } else {
+        const errorData = await res.json();
+        setSystemMessage({ text: errorData.error || `Failed to delete Test Case ${tcId}`, type: 'error' });
+      }
+    } catch (err) {
+      console.error('Delete Test Case error:', err);
+      setSystemMessage({ text: 'Connection error during Test Case deletion', type: 'error' });
+    }
+  };
+
+  const handleDeleteBug = async (bugId: string) => {
+    try {
+      const res = await fetch(`/api/bugs/${bugId}`, { method: 'DELETE' });
+      if (res.ok) {
+        await fetchInitialData(); // Await data re-fetch
+        setSystemMessage({ text: `Bug ${bugId} deleted successfully`, type: 'success' });
+      } else {
+        const errorData = await res.json();
+        setSystemMessage({ text: errorData.error || `Failed to delete Bug ${bugId}`, type: 'error' });
+      }
+    } catch (err) {
+      console.error('Delete Bug error:', err);
+      setSystemMessage({ text: 'Connection error during Bug deletion', type: 'error' });
+    }
+  };
+
+  const handleDeleteCycle = async (cycleId: string) => {
+    try {
+      const res = await fetch(`/api/cycles/${cycleId}`, { method: 'DELETE' });
+      if (res.ok) {
+        await fetchInitialData(); // Await data re-fetch
+        setSystemMessage({ text: `Cycle ${cycleId} deleted successfully`, type: 'success' });
+        // If the deleted cycle was the selected one, reset selectedCycleId
+        if (selectedCycleId === cycleId) {
+          setSelectedCycleId(cycles.length > 1 ? cycles.filter(c => c.id !== cycleId)[0]?.id || '' : '');
+        }
+      } else {
+        const errorData = await res.json();
+        setSystemMessage({ text: errorData.error || `Failed to delete Cycle ${cycleId}`, type: 'error' });
+      }
+    } catch (err) {
+      console.error('Delete Cycle error:', err);
+      setSystemMessage({ text: 'Connection error during Cycle deletion', type: 'error' });
+    }
+  };
+
   const [systemMessage, setSystemMessage] = useState<{ text: string, type: 'error' | 'success' } | null>(null);
 
   useEffect(() => {
@@ -821,7 +1031,7 @@ export default function App() {
     try {
       const res = await fetch(`/api/users/${id}`, { method: 'DELETE' });
       if (res.ok) {
-        setSystemMessage({ text: 'Member removed successfully', type: 'success' });
+        setSystemMessage({ text: 'Team member removed successfully', type: 'success' });
         fetchInitialData();
       } else {
         const errorData = await res.json();
@@ -893,6 +1103,7 @@ export default function App() {
           <AnimatePresence>
             {systemMessage && (
               <motion.div 
+                key={systemMessage.text + systemMessage.type} // Unique key for AnimatePresence
                 initial={{ opacity: 0, y: -20 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -20 }}
@@ -911,27 +1122,38 @@ export default function App() {
               {activeView === 'dashboard' ? 'Integrated Dashboard' : activeView}
             </h2>
             <div className="flex items-center gap-2 text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1">
-              Main <ChevronRight className="w-3 h-3" /> QA Environment <ChevronRight className="w-3 h-3" /> {activeView === 'dashboard' ? 'Dashboard & Analytics' : activeView}
+              VibeQA <ChevronRight className="w-3 h-3" /> {
+                activeView === 'dashboard' ? 'Dashboard & Analytics' : 
+                activeView === 'repository' ? 'Test Repository' : 
+                activeView === 'regressions' ? 'Regression Cycles' : 
+                activeView === 'bugs' ? 'Issues & Defects' : 
+                activeView === 'users' ? 'Team Members' : activeView
+              }
             </div>
           </div>
 
           <div className="flex items-center gap-4">
-             <div className="bg-slate-50 border border-slate-200 rounded-xl p-1 items-center flex">
+             <div className="relative">
                <select 
                  value={selectedCycleId}
                  onChange={(e) => setSelectedCycleId(e.target.value)}
-                 className="bg-transparent border-none text-xs font-black px-4 py-2 cursor-pointer focus:ring-0 uppercase tracking-widest"
+                 className="px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-[10px] font-black uppercase tracking-widest outline-none focus:ring-4 focus:ring-indigo-50 appearance-none pr-10 transition-all cursor-pointer min-w-[200px]"
                >
-                 {cycles.map(c => <option key={c.id} value={c.id}>{c.id}</option>)}
+                 {cycles.length === 0 && <option value="">No Cycles Found</option>}
+                 {cycles.map(c => (
+                   <option key={c.id} value={c.id}>{c.id} — {c.name}</option>
+                 ))}
                </select>
+               <ChevronDown className="w-3.5 h-3.5 absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
              </div>
-             
+
+             <div className="h-6 w-px bg-slate-200 mx-2" />
 
              <button 
                onClick={() => setModals(m => ({ ...m, export: true }))}
                className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-xl text-xs font-black uppercase tracking-widest hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-100"
              >
-               <Download className="w-4 h-4" /> Export
+               <Download className="w-4 h-4" /> Export 
              </button>
 
              <button 
@@ -963,7 +1185,7 @@ export default function App() {
                     cycles={cycles} 
                     testCases={testCases} 
                     bugs={bugs} 
-                    results={results} 
+                    results={allResults} 
                     users={users} 
                   />
                </div>
@@ -992,6 +1214,7 @@ export default function App() {
             testCases={testCases} 
             cycles={cycles} 
             currentUser={user}
+            selectedCycleId={selectedCycleId}
             initialData={editingItem?.type === 'bug' ? editingItem.data : null}
           />
         )}
@@ -1014,7 +1237,9 @@ export default function App() {
         {modals.execution && currentTestCase && (
            <ExecutionModal 
              testCase={currentTestCase} 
-             initialResult={results.find(r => r.testCaseId === currentTestCase.id) || null} 
+             initialResult={results
+               .filter(r => r.testCaseId === currentTestCase.id && r.cycleId === selectedCycleId)
+               .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())[0] || null}
              users={users} 
              onClose={() => setModals(m => ({ ...m, execution: false }))} 
              onSave={handleSaveResult} 
@@ -1038,8 +1263,43 @@ export default function App() {
             users={users}
             bugs={bugs}
             testCases={testCases}
-            results={results}
+            results={allResults}
           />
+        )}
+
+        {confirmModal.show && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-md">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              className="bg-white p-8 rounded-[32px] shadow-2xl max-w-sm w-full border border-slate-200"
+            >
+              <div className="w-12 h-12 bg-rose-50 text-rose-600 rounded-2xl flex items-center justify-center mb-6">
+                <AlertCircle className="w-6 h-6" />
+              </div>
+              <h3 className="text-xl font-black text-slate-900 mb-2">{confirmModal.title}</h3>
+              <p className="text-sm text-slate-500 font-medium mb-8 leading-relaxed">
+                {confirmModal.message}
+              </p>
+              <div className="flex gap-3">
+                <button 
+                  onClick={() => setConfirmModal({ ...confirmModal, show: false })}
+                  className="flex-1 py-3 bg-slate-100 text-slate-600 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-slate-200 transition-all"
+                >
+                  Cancel
+                </button>
+                <button 
+                  onClick={() => {
+                    confirmModal.onConfirm();
+                    setConfirmModal({ ...confirmModal, show: false });
+                  }}
+                  className="flex-1 py-3 bg-rose-600 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-rose-700 transition-all shadow-lg shadow-rose-200"
+                >
+                  Confirm
+                </button>
+              </div>
+            </motion.div>
+          </div>
         )}
       </AnimatePresence>
     </div>

@@ -1,3 +1,4 @@
+console.log("🔥 SERVER IS RUNNING - NEW VERSION LOADED");
 import express from "express";
 import path from "path";
 import cookieParser from "cookie-parser";
@@ -10,7 +11,8 @@ async function startServer() {
   const app = express();
   const PORT = 3000;
 
-  app.use(express.json());
+  app.use(express.json({ limit: '100mb' })); // Further increased limit for larger payloads
+  app.use(express.urlencoded({ limit: '100mb', extended: true }));
   app.use(cookieParser());
 
   // --- API Routes ---
@@ -72,9 +74,12 @@ async function startServer() {
   });
 
   app.delete("/api/users/:id", async (req, res) => {
-    const { id } = req.params;
+    const id = req.params.id.trim();
     try {
-      db.delete(users).where(eq(users.id, id)).run();
+      const result = db.delete(users).where(eq(users.id, id)).run();
+      if (result.changes === 0) {
+        return res.status(404).json({ error: "User not found" });
+      }
       res.json({ success: true });
     } catch (err: any) {
       console.error(`Failed to delete user ${id}:`, err);
@@ -149,9 +154,18 @@ async function startServer() {
   });
 
   app.delete("/api/test-cases/:id", async (req, res) => {
-    const { id } = req.params;
-    db.delete(testCases).where(eq(testCases.id, id)).run();
-    res.json({ success: true });
+    const id = req.params.id.trim();
+    try {
+      const result = db.delete(testCases).where(eq(testCases.id, id)).run();
+      if (result.changes === 0) {
+        return res.status(404).json({ error: "Test Case not found" });
+      }
+      res.json({ success: true });
+    } catch (err: any) {
+      console.error(`Failed to delete test case ${id}:`, err.message);
+      // More specific error handling could be added here if needed
+      res.status(500).json({ error: "Could not delete test case due to a server error." });
+    }
   });
 
   // Regression Cycles
@@ -187,7 +201,28 @@ async function startServer() {
     res.json({ success: true });
   });
 
+  app.delete("/api/cycles/:id", async (req, res) => {
+    const id = req.params.id.trim();
+    console.log(`Server: Request to delete cycle [${id}]`);
+    try {
+      const result = db.delete(regressionCycles).where(eq(regressionCycles.id, id)).run();
+      if (result.changes === 0) {
+        console.warn(`Server: Cycle [${id}] not found in database`);
+        return res.status(404).json({ error: "Cycle not found" });
+      }
+      res.json({ success: true });
+    } catch (err: any) {
+      console.error(`Failed to delete cycle ${id}:`, err);
+      res.status(500).json({ error: "Could not delete cycle due to a server error." });
+    }
+  });
+
   // Execution Results
+  app.get("/api/results", async (req, res) => {
+    const allResults = db.select().from(executionResults).orderBy(desc(executionResults.updatedAt)).all();
+    res.json(allResults);
+  });
+
   app.get("/api/results/:cycleId", async (req, res) => {
     const { cycleId } = req.params;
     const results = db.select().from(executionResults).where(eq(executionResults.cycleId, cycleId)).all();
@@ -197,8 +232,10 @@ async function startServer() {
   app.post("/api/results", async (req, res) => {
     const { cycleId, testCaseId, status, testerId, remarks, environment, buildVersion } = req.body;
     
-    const existing = db.select().from(executionResults)
+    // Find the latest existing result for this test case in this cycle
+    const existing = db.select().from(executionResults) 
       .where(and(eq(executionResults.cycleId, cycleId), eq(executionResults.testCaseId, testCaseId)))
+      .orderBy(desc(executionResults.updatedAt))
       .get();
 
     if (existing) {
@@ -322,6 +359,20 @@ async function startServer() {
     }
 
     res.json({ success: true });
+  });
+
+  app.delete("/api/bugs/:id", async (req, res) => {
+    const id = req.params.id.trim();
+    try {
+      const result = db.delete(bugs).where(eq(bugs.id, id)).run();
+      if (result.changes === 0) {
+        return res.status(404).json({ error: "Bug not found" });
+      }
+      res.json({ success: true });
+    } catch (err: any) {
+      console.error(`Failed to delete bug ${id}:`, err);
+      res.status(500).json({ error: "Could not delete bug due to a server error." });
+    }
   });
 
   // Robust cleanup and seeding

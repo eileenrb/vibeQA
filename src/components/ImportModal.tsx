@@ -31,7 +31,8 @@ export default function ImportModal({ onClose, onSuccess, users, testCases }: Im
 
   const validateAndParseFile = (file: File) => {
     const extension = file.name.split('.').pop()?.toLowerCase();
-    if (extension !== 'xlsx') {
+    const isValidExtension = extension === 'xlsx' || (importType === 'Bugs' && extension === 'csv');
+    if (!isValidExtension) {
       setError('The uploaded file format is not supported. Please upload a valid .xlsx file.');
       setFile(null);
       setPreviewData([]);
@@ -45,8 +46,11 @@ export default function ImportModal({ onClose, onSuccess, users, testCases }: Im
     const reader = new FileReader();
     reader.onload = (e) => {
       try {
-        const data = new Uint8Array(e.target?.result as ArrayBuffer);
-        const workbook = XLSX.read(data, { type: 'array' });
+        const type = extension === 'csv' ? 'string' : 'array';
+        const input = extension === 'csv'
+          ? new TextDecoder().decode(e.target?.result as ArrayBuffer)
+          : new Uint8Array(e.target?.result as ArrayBuffer);
+        const workbook = XLSX.read(input, { type });
         const firstSheetName = workbook.SheetNames[0];
         const worksheet = workbook.Sheets[firstSheetName];
         const jsonData = XLSX.utils.sheet_to_json(worksheet);
@@ -58,7 +62,7 @@ export default function ImportModal({ onClose, onSuccess, users, testCases }: Im
 
         validateTemplate(jsonData);
       } catch (err) {
-        setError('Error reading Excel file. Please ensure it is a valid .xlsx file.');
+        setError('Error reading file. Please ensure it is a valid .xlsx or .csv file.');
         console.error(err);
       }
     };
@@ -70,10 +74,7 @@ export default function ImportModal({ onClose, onSuccess, users, testCases }: Im
     let requiredColumns: string[] = [];
 
     if (importType === 'Test Cases') {
-      requiredColumns = [
-        'Test Case ID', 'Module', 'Feature', 'Title', 'Preconditions', 
-        'Steps to Test', 'Expected Result', 'Priority', 'Severity', 'Automation Status'
-      ];
+      requiredColumns = ['ID', 'Title', 'Test Steps', 'Expected Result'];
     } else {
       // Jira/Bug columns (flexible mapping)
       requiredColumns = ['Summary', 'Severity', 'Priority', 'Status']; // Minimal requirements
@@ -91,26 +92,31 @@ export default function ImportModal({ onClose, onSuccess, users, testCases }: Im
        setError('Missing required columns in uploaded file.');
        return;
     }
-
-    setPreviewData(data.slice(0, 50)); // Preview first 50 rows
+    // Preview removed, just set file and state
+    setPreviewData(data);
   };
 
   const mapJiraData = (jiraBug: any) => {
     // Map Jira keys to our Bug type
-    // Common Jira export headers: Summary, Description, Status, Priority, Severity, Issue key (Bug ID)
+    // Link issue ID and issue key together
+    const issueKey = jiraBug['Issue key'] || jiraBug['Key'] || jiraBug['Bug ID / Issue Key'] || '';
+    const issueId = jiraBug['ID'] || jiraBug['Issue ID'] || '';
+    const bugId = issueKey || issueId || `BUG-${Date.now()}`;
+    const linkedId = issueKey && issueId ? `${issueKey}-${issueId}` : bugId;
+    
     return {
-      id: jiraBug['Issue key'] || jiraBug['Bug ID'] || `JIRA-${Math.floor(Math.random() * 10000)}`,
-      title: jiraBug['Summary'] || 'No Summary',
+      id: linkedId,
+      title: jiraBug['Summary'] || jiraBug['Title / Summary'] || 'No Summary',
       description: jiraBug['Description'] || '',
       status: mapJiraStatus(jiraBug['Status']),
-      severity: jiraBug['Severity'] || 'Major',
+      severity: jiraBug['Custom field (Severity)'] || jiraBug['Severity'] || 'Major',
       priority: jiraBug['Priority'] || 'Medium',
       assigneeId: jiraBug['Assignee'] ? users.find(u => u.name === jiraBug['Assignee'])?.id || null : null,
       qaId: jiraBug['Reporter'] ? users.find(u => u.name === jiraBug['Reporter'])?.id || null : null,
       testCaseId: jiraBug['Linked Test Case ID'] || null,
       reopenCount: parseInt(jiraBug['Reopen Count'] || '0'),
-      createdAt: jiraBug['Created Date'] ? new Date(jiraBug['Created Date']).toISOString() : new Date().toISOString(),
-      updatedAt: jiraBug['Updated Date'] ? new Date(jiraBug['Updated Date']).toISOString() : new Date().toISOString(),
+      createdAt: jiraBug['Created'] ? new Date(jiraBug['Created']).toISOString() : new Date().toISOString(),
+      updatedAt: jiraBug['Updated'] ? new Date(jiraBug['Updated']).toISOString() : new Date().toISOString(),
     };
   };
 
@@ -130,59 +136,53 @@ export default function ImportModal({ onClose, onSuccess, users, testCases }: Im
     setLoading(true);
     setSummary(null);
 
-    const reader = new FileReader();
-    reader.onload = async (e) => {
-      const data = new Uint8Array(e.target?.result as ArrayBuffer);
-      const workbook = XLSX.read(data, { type: 'array' });
-      const jsonData = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]]);
+    let finalData = [];
+    let endpoint = '';
 
-      let finalData = [];
-      let endpoint = '';
+    // Use the previewData already parsed during validation
+    if (importType === 'Test Cases') {
+      endpoint = '/api/test-cases/bulk';
+      finalData = previewData.map((row: any) => ({
+        id: row['ID'],
+        module: row['Module Name'] || row['Module'] || 'Uncategorized',
+        feature: row['Feature'] || null,
+        title: row['Title'],
+        preconditions: row['Preconditions'] || null,
+        steps: row['Test Steps'] || row['Steps to Test'],
+        expectedResult: row['Expected Result'],
+        automationStatus: row['Method'] || 'Manual',
+        updatedAt: new Date().toISOString()
+      }));
+    } else {
+      endpoint = '/api/bugs/bulk';
+      finalData = previewData.map(mapJiraData);
+    }
 
-      if (importType === 'Test Cases') {
-        endpoint = '/api/test-cases/bulk';
-        finalData = jsonData.map((row: any) => ({
-          id: row['Test Case ID'],
-          module: row['Module'],
-          feature: row['Feature'],
-          title: row['Title'],
-          preconditions: row['Preconditions'],
-          steps: row['Steps to Test'],
-          expectedResult: row['Expected Result'],
-          priority: row['Priority'],
-          severity: row['Severity'],
-          automationStatus: row['Automation Status'],
-          updatedAt: new Date().toISOString()
-        }));
-      } else {
-        endpoint = '/api/bugs/bulk';
-        finalData = jsonData.map(mapJiraData);
+    try {
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ data: finalData, overwrite })
+      });
+
+      const result = await response.json();
+      setSummary({
+        success: result.successCount || 0,
+        failed: result.failedCount || 0,
+        errors: result.errors || []
+      });
+      
+      if (result.successCount > 0) {
+        onSuccess();
+        // Clear file and preview states to remove the "preview" UI
+        setFile(null);
+        setPreviewData([]);
       }
-
-      try {
-        const response = await fetch(endpoint, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ data: finalData, overwrite })
-        });
-
-        const result = await response.json();
-        setSummary({
-          success: result.successCount || 0,
-          failed: result.failedCount || 0,
-          errors: result.errors || []
-        });
-        
-        if (result.successCount > 0) {
-          onSuccess();
-        }
-      } catch (err) {
-        setError('Network error during import.');
-      } finally {
-        setLoading(false);
-      }
-    };
-    reader.readAsArrayBuffer(file);
+    } catch (err) {
+      setError('Network error during import.');
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -282,7 +282,7 @@ export default function ImportModal({ onClose, onSuccess, users, testCases }: Im
                   file ? "border-indigo-200 bg-indigo-50/30" : "border-slate-200 hover:border-indigo-400 hover:bg-slate-50"
                 )}
               >
-                <input type="file" ref={fileInputRef} className="hidden" accept=".xlsx" onChange={handleFileChange} />
+                <input type="file" ref={fileInputRef} className="hidden" accept={importType === 'Bugs' ? '.xlsx,.csv' : '.xlsx'} onChange={handleFileChange} />
                 <div className={cn(
                   "w-20 h-20 rounded-3xl flex items-center justify-center mb-4 transition-all",
                   file ? "bg-indigo-600 text-white shadow-xl shadow-indigo-100" : "bg-slate-100 text-slate-400 group-hover:bg-indigo-50 group-hover:text-indigo-500"
@@ -302,39 +302,6 @@ export default function ImportModal({ onClose, onSuccess, users, testCases }: Im
 
               {previewData.length > 0 && !error && (
                 <div className="space-y-4">
-                  <div className="flex items-center justify-between">
-                    <h4 className="text-xs font-black text-slate-900 uppercase tracking-widest">Preview (First 50 rows)</h4>
-                    <label className="flex items-center gap-2 cursor-pointer">
-                       <input 
-                         type="checkbox" 
-                         checked={overwrite} 
-                         onChange={e => setOverwrite(e.target.checked)}
-                         className="w-4 h-4 text-indigo-600 border-slate-300 rounded focus:ring-indigo-500"
-                       />
-                       <span className="text-xs font-bold text-slate-600">Overwrite existing IDs</span>
-                    </label>
-                  </div>
-                  <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden max-h-96 overflow-y-auto custom-scrollbar">
-                    <table className="w-full text-left text-xs">
-                      <thead className="bg-slate-50 sticky top-0 border-b border-slate-200">
-                        <tr>
-                          {Object.keys(previewData[0]).map(h => (
-                            <th key={h} className="px-4 py-3 font-black text-slate-400 uppercase tracking-widest whitespace-nowrap">{h}</th>
-                          ))}
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-100">
-                        {previewData.map((row, i) => (
-                          <tr key={i} className="hover:bg-slate-50 transition-colors">
-                            {Object.values(row).map((val: any, j) => (
-                              <td key={j} className="px-4 py-3 text-slate-700 font-medium truncate max-w-[200px]">{val?.toString() || '-'}</td>
-                            ))}
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-
                   <div className="pt-4 flex gap-4">
                     <button 
                       onClick={() => { setFile(null); setPreviewData([]); setError(null); }}

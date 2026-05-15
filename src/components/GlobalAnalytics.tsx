@@ -21,10 +21,19 @@ interface GlobalAnalyticsProps {
 
 export default function GlobalAnalytics({ cycles, testCases, bugs, results, users }: GlobalAnalyticsProps) {
   const stats = useMemo(() => {
-    const totalExecutions = results.length;
-    const passed = results.filter(r => r.status === 'Pass').length;
-    const failed = results.filter(r => r.status === 'Fail').length;
-    const blocked = results.filter(r => r.status === 'Blocked').length;
+    // Get latest unique execution results across all cycles
+    const latestResultsMap = results.reduce((map, r) => {
+      const key = `${r.cycleId}-${r.testCaseId}`;
+      const existing = map.get(key);
+      if (!existing || new Date(r.updatedAt || r.executionDate || 0) > new Date(existing.updatedAt || existing.executionDate || 0)) {
+        map.set(key, r);
+      }
+      return map;
+    }, new Map<string, ExecutionResult>());
+
+    const uniqueResults = Array.from(latestResultsMap.values());
+    const totalExecutions = uniqueResults.length;
+    const passed = uniqueResults.filter(r => r.status === 'Pass').length;
     
     return {
       totalCycles: cycles.length,
@@ -39,11 +48,23 @@ export default function GlobalAnalytics({ cycles, testCases, bugs, results, user
   }, [cycles, testCases, bugs, results]);
 
   const cyclePerformanceData = useMemo(() => {
-    return cycles.slice(-10).map(cycle => {
+    // Show the 10 most recent cycles in chronological order for the trend
+    return [...cycles].sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()).slice(-10).map(cycle => {
       const cycleResults = results.filter(r => r.cycleId === cycle.id);
+      
+      // Filter to latest unique status per test case in this specific cycle
+      const latestCycleResults = cycleResults.reduce((map, r) => {
+        const existing = map.get(r.testCaseId);
+        if (!existing || new Date(r.updatedAt || r.executionDate || 0) > new Date(existing.updatedAt || existing.executionDate || 0)) {
+          map.set(r.testCaseId, r);
+        }
+        return map;
+      }, new Map<string, ExecutionResult>());
+
+      const uniqueResults = Array.from(latestCycleResults.values());
+      const total = uniqueResults.length;
+      const passed = uniqueResults.filter(r => r.status === 'Pass').length;
       const cycleBugs = bugs.filter(b => b.cycleId === cycle.id);
-      const total = cycleResults.length;
-      const passed = cycleResults.filter(r => r.status === 'Pass').length;
       
       return {
         name: cycle.id,
@@ -66,11 +87,12 @@ export default function GlobalAnalytics({ cycles, testCases, bugs, results, user
   return (
     <div className="space-y-6 pb-12 animate-in fade-in slide-in-from-bottom-4 duration-500">
       {/* Summary Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
         <StatCard icon={<Layers className="w-5 h-5" />} label="Regression Cycles" value={stats.totalCycles} color="indigo" />
         <StatCard icon={<CheckCircle2 className="w-5 h-5" />} label="Pass Rate" value={`${stats.passRate}%`} color="emerald" subvalue="Overall execution health" />
         <StatCard icon={<Bug className="w-5 h-5" />} label="Defect Density" value={stats.defectDensity} color="rose" subvalue="Bugs per test case" />
-        <StatCard icon={<Zap className="w-5 h-5" />} label="Active Bugs" value={stats.activeBugs} color="amber" subvalue={`${stats.reopenedBugs} reopens detected`} />
+        <StatCard icon={<Zap className="w-5 h-5" />} label="Active Bugs" value={stats.activeBugs} color="amber" subvalue="Open and in-progress issues" />
+        <StatCard icon={<AlertCircle className="w-5 h-5" />} label="Reopened Bugs" value={stats.reopenedBugs} color="rose" subvalue="Bugs reopened at least once" />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -85,7 +107,7 @@ export default function GlobalAnalytics({ cycles, testCases, bugs, results, user
             </div>
           </div>
           <div className="h-64">
-            <ResponsiveContainer width="100%" height="100%">
+            <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
               <AreaChart data={cyclePerformanceData}>
                 <defs>
                   <linearGradient id="colorPass" x1="0" y1="0" x2="0" y2="1">
@@ -116,7 +138,7 @@ export default function GlobalAnalytics({ cycles, testCases, bugs, results, user
             </div>
           </div>
           <div className="h-64">
-            <ResponsiveContainer width="100%" height="100%">
+            <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
               <BarChart data={cyclePerformanceData}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
                 <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fontSize: 10, fontWeight: 700, fill: '#64748b' }} />
@@ -142,7 +164,7 @@ export default function GlobalAnalytics({ cycles, testCases, bugs, results, user
             <h3 className="text-sm font-black text-slate-900 uppercase tracking-widest">Top Performers</h3>
           </div>
           <div className="h-64">
-            <ResponsiveContainer width="100%" height="100%">
+            <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
               <BarChart data={testerProductivity} layout="vertical">
                 <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#f1f5f9" />
                 <XAxis type="number" hide />
@@ -189,8 +211,20 @@ export default function GlobalAnalytics({ cycles, testCases, bugs, results, user
             </thead>
             <tbody className="divide-y divide-slate-100">
                {cycles.map(cycle => {
-                 const res = results.filter(r => r.cycleId === cycle.id);
-                 const passRate = res.length > 0 ? Math.round((res.filter(r => r.status === 'Pass').length / res.length) * 100) : 0;
+                 const cycleResults = (results || []).filter(r => r.cycleId === cycle.id);
+                 
+                 const latestCycleResults = cycleResults.reduce((map, r) => {
+                   const existing = map.get(r.testCaseId);
+                   if (!existing || new Date(r.updatedAt || r.executionDate || 0) > new Date(existing.updatedAt || existing.executionDate || 0)) {
+                     map.set(r.testCaseId, r);
+                   }
+                   return map;
+                 }, new Map<string, any>());
+
+                 const uniqueResults = Array.from(latestCycleResults.values());
+                 const passRate = uniqueResults.length > 0 
+                   ? Math.round((uniqueResults.filter(r => r.status === 'Pass').length / uniqueResults.length) * 100) 
+                   : 0;
                  return (
                     <tr key={cycle.id} className="hover:bg-slate-50 transition-colors">
                       <td className="px-8 py-5 text-sm font-black text-slate-900">{cycle.id}</td>

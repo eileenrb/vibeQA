@@ -60,8 +60,8 @@ export const bugs = sqliteTable('bugs', {
   priority: text('priority').notNull(),
   severity: text('severity').notNull(),
   environment: text('environment'),
-  testCaseId: text('test_case_id').references(() => testCases.id),
-  cycleId: text('cycle_id').references(() => regressionCycles.id),
+  testCaseId: text('test_case_id').references(() => testCases.id, { onDelete: 'set null' }),
+  cycleId: text('cycle_id').references(() => regressionCycles.id, { onDelete: 'cascade' }),
   assigneeId: text('assignee_id').references(() => users.id, { onDelete: 'set null' }), // Member assigned to fix
   qaId: text('qa_id').references(() => users.id, { onDelete: 'set null' }), // QA who reported
   reopenCount: integer('reopen_count').default(0),

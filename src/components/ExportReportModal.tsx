@@ -17,13 +17,28 @@ interface ExportReportModalProps {
 
 export default function ExportReportModal({ onClose, cycles, users, bugs, testCases, results }: ExportReportModalProps) {
   const [selectedCycleIds, setSelectedCycleIds] = useState<string[]>([]);
-  const [reportType, setReportType] = useState<'selected' | 'overall'>('overall');
   const [loading, setLoading] = useState(false);
+  const [hasInitializedSelection, setHasInitializedSelection] = useState(false);
+
+  React.useEffect(() => {
+    if (cycles.length > 0 && !hasInitializedSelection) {
+      setSelectedCycleIds(cycles.map(cycle => cycle.id));
+      setHasInitializedSelection(true);
+    }
+  }, [cycles, hasInitializedSelection]);
+
+  const selectedCycles = selectedCycleIds.length > 0
+    ? cycles.filter(cycle => selectedCycleIds.includes(cycle.id))
+    : [];
+
+  const selectedCount = selectedCycleIds.length;
+  const allSelected = selectedCount === cycles.length && cycles.length > 0;
 
   const handleExport = async () => {
+    if (selectedCount === 0) return;
+
     setLoading(true);
     try {
-      const selectedCycles = reportType === 'overall' ? cycles : cycles.filter(c => selectedCycleIds.includes(c.id));
       await exportOverallSummary(selectedCycles, users, bugs, testCases, results);
       onClose();
     } catch (error) {
@@ -34,9 +49,13 @@ export default function ExportReportModal({ onClose, cycles, users, bugs, testCa
   };
 
   const toggleCycle = (id: string) => {
-    setSelectedCycleIds(prev => 
+    setSelectedCycleIds(prev =>
       prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]
     );
+  };
+
+  const toggleAll = () => {
+    setSelectedCycleIds(allSelected ? [] : cycles.map(cycle => cycle.id));
   };
 
   return (
@@ -62,65 +81,48 @@ export default function ExportReportModal({ onClose, cycles, users, bugs, testCa
         </div>
 
         <div className="p-8 space-y-8">
-          <div className="flex p-1 bg-slate-100 rounded-2xl w-fit">
-            <button 
-              onClick={() => setReportType('overall')}
-              className={cn(
-                "px-6 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest transition-all flex items-center gap-2",
-                reportType === 'overall' ? "bg-white text-indigo-600 shadow-sm" : "text-slate-500"
-              )}
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <div className="text-xs font-black uppercase tracking-widest text-slate-500">Select cycles to export</div>
+              <div className="text-sm font-black text-slate-900 mt-1">{selectedCount} of {cycles.length} selected</div>
+            </div>
+            <button
+              onClick={toggleAll}
+              className="text-xs font-black uppercase tracking-widest text-indigo-600 hover:text-indigo-800 transition"
             >
-              <Activity className="w-4 h-4" /> Overall Summary
-            </button>
-            <button 
-              onClick={() => setReportType('selected')}
-              className={cn(
-                "px-6 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest transition-all flex items-center gap-2",
-                reportType === 'selected' ? "bg-white text-rose-600 shadow-sm" : "text-slate-500"
-              )}
-            >
-              <Layers className="w-4 h-4" /> Selected Cycles
+              {allSelected ? 'Clear all' : 'Select all'}
             </button>
           </div>
 
-          {reportType === 'selected' && (
-            <div className="space-y-4">
-              <h4 className="text-xs font-black text-slate-900 uppercase tracking-widest">Select Cycles to Include</h4>
-              <div className="grid grid-cols-2 gap-3 max-h-60 overflow-y-auto pr-2 custom-scrollbar">
-                {cycles.map(cycle => (
-                  <button
-                    key={cycle.id}
-                    onClick={() => toggleCycle(cycle.id)}
-                    className={cn(
-                      "flex items-center justify-between p-4 rounded-2xl border transition-all text-left",
-                      selectedCycleIds.includes(cycle.id) 
-                        ? "bg-rose-50 border-rose-200 text-rose-900 ring-4 ring-rose-50" 
-                        : "bg-white border-slate-200 text-slate-600 hover:border-rose-200"
-                    )}
-                  >
-                    <div>
-                      <div className="text-xs font-black uppercase tracking-widest">{cycle.id}</div>
-                      <div className="text-[10px] font-bold text-slate-500">{cycle.version}</div>
-                    </div>
-                    {selectedCycleIds.includes(cycle.id) && <CheckCircle2 className="w-5 h-5 text-rose-600" />}
-                  </button>
-                ))}
-              </div>
+          <div className="space-y-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-3 max-h-[420px] overflow-y-auto pr-2 custom-scrollbar">
+              {cycles.map(cycle => (
+                <button
+                  key={cycle.id}
+                  onClick={() => toggleCycle(cycle.id)}
+                  className={cn(
+                    "flex items-center justify-between p-4 rounded-2xl border transition-colors text-left min-h-[80px] break-words",
+                    selectedCycleIds.includes(cycle.id)
+                      ? "bg-rose-50 border-rose-300 text-rose-900 shadow-sm"
+                      : "bg-white border-slate-200 text-slate-600 hover:border-slate-300"
+                  )}
+                >
+                  <div className="min-w-0">
+                    <div className="text-xs font-black uppercase tracking-widest truncate">{cycle.id}</div>
+                    <div className="text-[10px] font-bold text-slate-500 truncate">{cycle.version}</div>
+                  </div>
+                  {selectedCycleIds.includes(cycle.id) && <CheckCircle2 className="w-5 h-5 text-rose-600" />}
+                </button>
+              ))}
             </div>
-          )}
+            {selectedCycleIds.length === 0 && (
+              <p className="text-xs font-black uppercase tracking-widest text-rose-600">Select at least one cycle to export</p>
+            )}
+          </div>
 
           <div className="bg-slate-50 p-6 rounded-[24px] border border-slate-100">
-            <div className="flex items-start gap-4">
-               <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center text-slate-400 border border-slate-200">
-                 <Layout className="w-5 h-5" />
-               </div>
-               <div>
-                  <h5 className="text-sm font-black text-slate-900 mb-1">Report Contents</h5>
-                  <p className="text-xs text-slate-500 font-medium leading-relaxed">
-                    This report includes executive summaries, multi-cycle performance trends, bug density analysis, and tester productivity metrics.
-                  </p>
-               </div>
-            </div>
+            <p className="text-sm font-black text-slate-900">Export report</p>
+            <p className="text-xs text-slate-500 mt-2">Generate a concise PDF for the selected cycles.</p>
           </div>
         </div>
 
@@ -133,10 +135,10 @@ export default function ExportReportModal({ onClose, cycles, users, bugs, testCa
           </button>
           <button 
             onClick={handleExport}
-            disabled={loading || (reportType === 'selected' && selectedCycleIds.length === 0)}
+            disabled={loading || selectedCycles.length === 0}
             className="flex-[2] py-4 bg-rose-600 text-white rounded-2xl text-sm font-black uppercase tracking-widest hover:bg-rose-700 transition-all shadow-xl shadow-rose-200 disabled:opacity-50 disabled:shadow-none"
           >
-            {loading ? 'Generating PDF...' : `Generate ${reportType === 'overall' ? 'Overall' : 'Selected'} Report`}
+            {loading ? 'Generating PDF...' : 'Generate Report'}
           </button>
         </div>
       </motion.div>

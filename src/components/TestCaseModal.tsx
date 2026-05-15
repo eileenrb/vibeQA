@@ -18,9 +18,8 @@ export default function TestCaseModal({ initialData, onClose, onSave }: TestCase
     preconditions: '',
     steps: '',
     expectedResult: '',
-    priority: 'Medium' as Priority,
     severity: 'Major' as Severity,
-    automationStatus: 'Manual' as AutomationStatus,
+    Method: 'Manual' as AutomationStatus,
     tags: ''
   });
 
@@ -34,9 +33,8 @@ export default function TestCaseModal({ initialData, onClose, onSave }: TestCase
         preconditions: initialData.preconditions || '',
         steps: initialData.steps,
         expectedResult: initialData.expectedResult,
-        priority: initialData.priority,
         severity: initialData.severity,
-        automationStatus: initialData.automationStatus,
+        Method: initialData.automationStatus,
         tags: initialData.tags || ''
       });
     }
@@ -44,6 +42,10 @@ export default function TestCaseModal({ initialData, onClose, onSave }: TestCase
 
   const handleSubmit = (e: FormEvent) => {
     e.preventDefault();
+    if (!formData.id) {
+      alert('Test Case ID cannot be empty.');
+      return;
+    }
     onSave(formData);
   };
 
@@ -79,9 +81,14 @@ export default function TestCaseModal({ initialData, onClose, onSave }: TestCase
                     required 
                     type="text" 
                     placeholder="e.g. TC-001"
-                    className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold focus:ring-2 focus:ring-indigo-500 outline-none"
+                    className={`w-full px-4 py-2.5 rounded-xl text-sm font-bold outline-none ${
+                      initialData 
+                        ? 'bg-slate-100 border border-slate-200 text-slate-500 cursor-not-allowed' 
+                        : 'bg-slate-50 border border-slate-200 focus:ring-2 focus:ring-indigo-500'
+                    }`}
                     value={formData.id} 
-                    onChange={e => setFormData({ ...formData, id: e.target.value })}
+                    readOnly={!!initialData}
+                    onChange={e => !initialData && setFormData({ ...formData, id: e.target.value })}
                   />
                </div>
                <div>
@@ -108,23 +115,11 @@ export default function TestCaseModal({ initialData, onClose, onSave }: TestCase
             </div>
 
             <div className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">Priority</label>
-                  <select 
-                    className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold focus:ring-2 focus:ring-indigo-500 outline-none"
-                    value={formData.priority}
-                    onChange={e => setFormData({ ...formData, priority: e.target.value as Priority })}
-                  >
-                    <option value="High">High</option>
-                    <option value="Medium">Medium</option>
-                    <option value="Low">Low</option>
-                  </select>
-                </div>
+              <div className="grid grid-cols-1 gap-4">
                 <div>
                   <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">Severity</label>
                   <select 
-                    className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold focus:ring-2 focus:ring-indigo-500 outline-none"
+                    className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold focus:ring-2 focus:ring-indigo-500 outline-none appearance-none bg-[url('data:image/svg+xml;charset=utf-8,%3Csvg_xmlns=%22http://www.w3.org/2000/svg%22_fill=%22none%22_viewBox=%220_0_20_20%22%3E%3Cpath_stroke=%22%236b7280%22_stroke-linecap=%22round%22_stroke-linejoin=%22round%22_stroke-width=%221.5%22_d=%22m6_8_4_4_4-4%22/%3E%3C/svg%3E')] bg-[position:right_16px_center] bg-no-repeat pr-10"
                     value={formData.severity}
                     onChange={e => setFormData({ ...formData, severity: e.target.value as Severity })}
                   >
@@ -136,11 +131,11 @@ export default function TestCaseModal({ initialData, onClose, onSave }: TestCase
                 </div>
               </div>
               <div>
-                <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">Automation Status</label>
+                <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">Method</label>
                 <select 
-                  className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold focus:ring-2 focus:ring-indigo-500 outline-none"
-                  value={formData.automationStatus}
-                  onChange={e => setFormData({ ...formData, automationStatus: e.target.value as AutomationStatus })}
+                  className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold focus:ring-2 focus:ring-indigo-500 outline-none appearance-none bg-[url('data:image/svg+xml;charset=utf-8,%3Csvg_xmlns=%22http://www.w3.org/2000/svg%22_fill=%22none%22_viewBox=%220_0_20_20%22%3E%3Cpath_stroke=%22%236b7280%22_stroke-linecap=%22round%22_stroke-linejoin=%22round%22_stroke-width=%221.5%22_d=%22m6_8_4_4_4-4%22/%3E%3C/svg%3E')] bg-[position:right_16px_center] bg-no-repeat pr-10"
+                  value={formData.Method}
+                  onChange={e => setFormData({ ...formData, Method: e.target.value as AutomationStatus })}
                 >
                   <option value="Automated">Automated</option>
                   <option value="Manual">Manual</option>

@@ -10,12 +10,13 @@ interface BugModalProps {
   testCases: TestCase[];
   cycles: RegressionCycle[];
   currentUser: User | null;
+  selectedCycleId?: string;
   initialData?: Bug | null;
 }
 
-export default function BugModal({ onClose, onSave, users, testCases, cycles, currentUser, initialData }: BugModalProps) {
+export default function BugModal({ onClose, onSave, users, testCases, cycles, currentUser, selectedCycleId, initialData }: BugModalProps) {
   const [formData, setFormData] = useState({
-    id: initialData?.id || `BUG-${Math.floor(Math.random() * 1000) + 100}`,
+    id: initialData?.id || '',
     title: initialData?.title || '',
     description: initialData?.description || '',
     status: initialData?.status || 'Todo' as BugStatus,
@@ -23,13 +24,18 @@ export default function BugModal({ onClose, onSave, users, testCases, cycles, cu
     severity: initialData?.severity || 'Major' as Severity,
     environment: initialData?.environment || 'Staging',
     testCaseId: initialData?.testCaseId || '',
-    cycleId: initialData?.cycleId || '',
+    cycleId: initialData?.cycleId || selectedCycleId || '',
     assigneeId: initialData?.assigneeId || '',
     qaId: initialData?.qaId || currentUser?.id || '',
+    reopenCount: initialData?.reopenCount ?? 0,
   });
 
   const handleSubmit = (e: FormEvent) => {
     e.preventDefault();
+    if (!formData.id) {
+      alert('Bug ID cannot be empty.');
+      return;
+    }
     onSave(formData, initialData ? 'PUT' : 'POST');
     onClose();
   };
@@ -58,15 +64,22 @@ export default function BugModal({ onClose, onSave, users, testCases, cycles, cu
         </div>
 
         <form onSubmit={handleSubmit} className="p-8 overflow-y-auto space-y-6 custom-scrollbar">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div className="space-y-4">
+          <div className="grid gap-6 md:grid-cols-2">
+            <div className="grid gap-6">
               <div>
                 <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">Bug ID</label>
-                <input 
-                  required readOnly
-                  type="text" 
-                  className="w-full px-4 py-2.5 bg-slate-100 border border-slate-200 rounded-xl text-sm font-bold outline-none text-slate-500"
+                <input
+                  required
+                  type="text"
+                  placeholder="e.g. BUG-001"
+                  className={`w-full px-4 py-2.5 rounded-xl text-sm font-bold outline-none ${
+                    initialData 
+                      ? 'bg-slate-100 border border-slate-200 text-slate-500 cursor-not-allowed' 
+                      : 'bg-slate-50 border border-slate-200 focus:ring-2 focus:ring-rose-500'
+                  }`}
                   value={formData.id}
+                  readOnly={!!initialData}
+                  onChange={e => !initialData && setFormData({ ...formData, id: e.target.value })}
                 />
               </div>
               <div>
@@ -81,22 +94,9 @@ export default function BugModal({ onClose, onSave, users, testCases, cycles, cu
                 />
               </div>
               <div>
-                <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">Environment</label>
-                <select 
-                  className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold focus:ring-2 focus:ring-rose-500 outline-none"
-                  value={formData.environment}
-                  onChange={e => setFormData({ ...formData, environment: e.target.value })}
-                >
-                  <option value="Production">Production</option>
-                  <option value="Staging">Staging</option>
-                  <option value="UAT">UAT</option>
-                  <option value="Dev">Dev</option>
-                </select>
-              </div>
-              <div>
                 <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">Status</label>
                 <select 
-                  className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold focus:ring-2 focus:ring-rose-500 outline-none"
+                  className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold focus:ring-2 focus:ring-rose-500 outline-none appearance-none bg-[url('data:image/svg+xml;charset=utf-8,%3Csvg_xmlns=%22http://www.w3.org/2000/svg%22_fill=%22none%22_viewBox=%220_0_20_20%22%3E%3Cpath_stroke=%22%236b7280%22_stroke-linecap=%22round%22_stroke-linejoin=%22round%22_stroke-width=%221.5%22_d=%22m6_8_4_4_4-4%22/%3E%3C/svg%3E')] bg-[position:right_16px_center] bg-no-repeat pr-10"
                   value={formData.status}
                   onChange={e => setFormData({ ...formData, status: e.target.value as BugStatus })}
                 >
@@ -107,40 +107,77 @@ export default function BugModal({ onClose, onSave, users, testCases, cycles, cu
                   <option value="Done">Done</option>
                 </select>
               </div>
+              <div>
+                <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">Environment</label>
+                <select 
+                  className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold focus:ring-2 focus:ring-rose-500 outline-none appearance-none bg-[url('data:image/svg+xml;charset=utf-8,%3Csvg_xmlns=%22http://www.w3.org/2000/svg%22_fill=%22none%22_viewBox=%220_0_20_20%22%3E%3Cpath_stroke=%22%236b7280%22_stroke-linecap=%22round%22_stroke-linejoin=%22round%22_stroke-width=%221.5%22_d=%22m6_8_4_4_4-4%22/%3E%3C/svg%3E')] bg-[position:right_16px_center] bg-no-repeat pr-10"
+                  value={formData.environment}
+                  onChange={e => setFormData({ ...formData, environment: e.target.value })}
+                >
+                  <option value="Production">Production</option>
+                  <option value="Staging">Staging</option>
+                  <option value="UAT">UAT</option>
+                  <option value="Dev">Dev</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">Related Cycle</label>
+                <select 
+                  className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold focus:ring-2 focus:ring-rose-500 outline-none appearance-none bg-[url('data:image/svg+xml;charset=utf-8,%3Csvg_xmlns=%22http://www.w3.org/2000/svg%22_fill=%22none%22_viewBox=%220_0_20_20%22%3E%3Cpath_stroke=%22%236b7280%22_stroke-linecap=%22round%22_stroke-linejoin=%22round%22_stroke-width=%221.5%22_d=%22m6_8_4_4_4-4%22/%3E%3C/svg%3E')] bg-[position:right_16px_center] bg-no-repeat pr-10"
+                  value={formData.cycleId}
+                  onChange={e => setFormData({ ...formData, cycleId: e.target.value })}
+                >
+                  <option value="">None</option>
+                  {cycles.map(cycle => (
+                    <option key={cycle.id} value={cycle.id}>
+                      {cycle.id}: {cycle.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
             </div>
 
-            <div className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">Priority</label>
-                  <select 
-                    className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold focus:ring-2 focus:ring-rose-500 outline-none"
-                    value={formData.priority}
-                    onChange={e => setFormData({ ...formData, priority: e.target.value as Priority })}
-                  >
-                    <option value="High">High</option>
-                    <option value="Medium">Medium</option>
-                    <option value="Low">Low</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">Severity</label>
-                  <select 
-                    className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold focus:ring-2 focus:ring-rose-500 outline-none"
-                    value={formData.severity}
-                    onChange={e => setFormData({ ...formData, severity: e.target.value as Severity })}
-                  >
-                    <option value="Critical">Critical</option>
-                    <option value="Major">Major</option>
-                    <option value="Minor">Minor</option>
-                    <option value="Trivial">Trivial</option>
-                  </select>
-                </div>
+            <div className="grid gap-6">
+              <div>
+                <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">Priority</label>
+                <select 
+                  className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold focus:ring-2 focus:ring-rose-500 outline-none appearance-none bg-[url('data:image/svg+xml;charset=utf-8,%3Csvg_xmlns=%22http://www.w3.org/2000/svg%22_fill=%22none%22_viewBox=%220_0_20_20%22%3E%3Cpath_stroke=%22%236b7280%22_stroke-linecap=%22round%22_stroke-linejoin=%22round%22_stroke-width=%221.5%22_d=%22m6_8_4_4_4-4%22/%3E%3C/svg%3E')] bg-[position:right_16px_center] bg-no-repeat pr-10"
+                  value={formData.priority}
+                  onChange={e => setFormData({ ...formData, priority: e.target.value as Priority })}
+                >
+                  <option value="High">High</option>
+                  <option value="Medium">Medium</option>
+                  <option value="Low">Low</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">Severity</label>
+                <select 
+                  className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold focus:ring-2 focus:ring-rose-500 outline-none appearance-none bg-[url('data:image/svg+xml;charset=utf-8,%3Csvg_xmlns=%22http://www.w3.org/2000/svg%22_fill=%22none%22_viewBox=%220_0_20_20%22%3E%3Cpath_stroke=%22%236b7280%22_stroke-linecap=%22round%22_stroke-linejoin=%22round%22_stroke-width=%221.5%22_d=%22m6_8_4_4_4-4%22/%3E%3C/svg%3E')] bg-[position:right_16px_center] bg-no-repeat pr-10"
+                  value={formData.severity}
+                  onChange={e => setFormData({ ...formData, severity: e.target.value as Severity })}
+                >
+                  <option value="Critical">Critical</option>
+                  <option value="Major">Major</option>
+                  <option value="Minor">Minor</option>
+                  <option value="Trivial">Trivial</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">Reopen Count</label>
+                <input
+                  type="number"
+                  min={0}
+                  step={1}
+                  className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold focus:ring-2 focus:ring-rose-500 outline-none"
+                  value={formData.reopenCount}
+                  onChange={e => setFormData({ ...formData, reopenCount: Number(e.target.value) })}
+                />
               </div>
               <div>
                 <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">Assignee</label>
                 <select 
-                  className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold focus:ring-2 focus:ring-rose-500 outline-none"
+                  className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold focus:ring-2 focus:ring-rose-500 outline-none appearance-none bg-[url('data:image/svg+xml;charset=utf-8,%3Csvg_xmlns=%22http://www.w3.org/2000/svg%22_fill=%22none%22_viewBox=%220_0_20_20%22%3E%3Cpath_stroke=%22%236b7280%22_stroke-linecap=%22round%22_stroke-linejoin=%22round%22_stroke-width=%221.5%22_d=%22m6_8_4_4_4-4%22/%3E%3C/svg%3E')] bg-[position:right_16px_center] bg-no-repeat pr-10"
                   value={formData.assigneeId}
                   onChange={e => setFormData({ ...formData, assigneeId: e.target.value })}
                 >
@@ -153,7 +190,7 @@ export default function BugModal({ onClose, onSave, users, testCases, cycles, cu
               <div>
                 <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">Related Test Case</label>
                 <select 
-                  className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold focus:ring-2 focus:ring-rose-500 outline-none text-xs"
+                  className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold focus:ring-2 focus:ring-rose-500 outline-none appearance-none bg-[url('data:image/svg+xml;charset=utf-8,%3Csvg_xmlns=%22http://www.w3.org/2000/svg%22_fill=%22none%22_viewBox=%220_0_20_20%22%3E%3Cpath_stroke=%22%236b7280%22_stroke-linecap=%22round%22_stroke-linejoin=%22round%22_stroke-width=%221.5%22_d=%22m6_8_4_4_4-4%22/%3E%3C/svg%3E')] bg-[position:right_16px_center] bg-no-repeat pr-10"
                   value={formData.testCaseId}
                   onChange={e => setFormData({ ...formData, testCaseId: e.target.value })}
                 >
